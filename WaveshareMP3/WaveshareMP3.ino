@@ -306,6 +306,49 @@ static void renderCard(const char *banner) {
   EPD_1IN54G_Display(fb);
 }
 
+// Farewell screen. Font8 is 5px wide, so 40 columns fit across the 200px
+// panel -- "PLAYER" needs 35, which is why the words are stacked rather than
+// set on one line.
+static const char *ART_SEA[] = {
+  "##### #####  ###",
+  "#     #     #   #",
+  "##### ####  #####",
+  "    # #     #   #",
+  "##### ##### #   #",
+};
+static const char *ART_MP3[] = {
+  "#   # ####  ####",
+  "## ## #   #     #",
+  "# # # ####   ###",
+  "#   # #         #",
+  "#   # #     ####",
+};
+static const char *ART_PLAYER[] = {
+  "####  #      ###  #   # ##### ####",
+  "#   # #     #   #  # #  #     #   #",
+  "####  #     #####   #   ####  ####",
+  "#     #     #   #   #   #     #  #",
+  "#     ##### #   #   #   ##### #   #",
+};
+#define ART_ROWS 5
+
+static void drawArt(const char **rows, UWORD x, UWORD y) {
+  for (int i = 0; i < ART_ROWS; i++) {
+    Paint_DrawString_EN(x, y + i * Font8.Height, rows[i], &Font8,
+                        EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
+  }
+}
+
+// x offsets centre each word: 17 and 35 columns at 5px per column.
+static void renderGoodbye() {
+  Paint_SelectImage(fb);
+  Paint_Clear(EPD_1IN54G_WHITE);
+  drawArt(ART_SEA,    57, 32);
+  drawArt(ART_MP3,    57, 82);
+  drawArt(ART_PLAYER, 12, 132);
+  EPD_1IN54G_Display(fb);
+}
+
 // Shut down and cut the battery rail. Runs on the display task because that
 // task owns the bit-banged panel SPI -- doing this from the button task could
 // land in the middle of a 15 s refresh and interleave two writers on the bus.
@@ -315,10 +358,12 @@ static void powerOff() {
   digitalWrite(PIN_PA_CTRL, LOW);       // amp off
   digitalWrite(PIN_AUDIO_PWR, HIGH);    // audio rail off (active low)
 
-  // Waveshare's own example clears the panel before sleeping it; leaving an
-  // image latched on a powered-down four-colour panel risks ghosting.
+  // Leave the farewell screen showing rather than a blank panel -- e-paper
+  // holds its last image with no power. Sleeping the panel afterwards is still
+  // required; that is what protects it, not the clear.
   EPD_1IN54G_Init();
-  EPD_1IN54G_Clear(EPD_1IN54G_WHITE);
+  if (fb) renderGoodbye();
+  else    EPD_1IN54G_Clear(EPD_1IN54G_WHITE);
   EPD_1IN54G_Sleep();
   DEV_Delay_ms(2000);                   // vendor requires >=2 s before cutting the module
   DEV_Module_Exit();
