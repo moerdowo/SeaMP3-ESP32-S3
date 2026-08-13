@@ -306,46 +306,50 @@ static void renderCard(const char *banner) {
   EPD_1IN54G_Display(fb);
 }
 
-// Farewell screen. Font8 is 5px wide, so 40 columns fit across the 200px
-// panel -- "PLAYER" needs 35, which is why the words are stacked rather than
-// set on one line.
-static const char *ART_SEA[] = {
-  "##### #####  ###",
-  "#     #     #   #",
-  "##### ####  #####",
-  "    # #     #   #",
-  "##### ##### #   #",
-};
-static const char *ART_MP3[] = {
-  "#   # ####  ####",
-  "## ## #   #     #",
-  "# # # ####   ###",
-  "#   # #         #",
-  "#   # #     ####",
-};
-static const char *ART_PLAYER[] = {
-  "####  #      ###  #   # ##### ####",
-  "#   # #     #   #  # #  #     #   #",
-  "####  #     #####   #   ####  ####",
-  "#     #     #   #   #   #     #  #",
-  "#     ##### #   #   #   ##### #   #",
-};
-#define ART_ROWS 5
-
-static void drawArt(const char **rows, UWORD x, UWORD y) {
-  for (int i = 0; i < ART_ROWS; i++) {
-    Paint_DrawString_EN(x, y + i * Font8.Height, rows[i], &Font8,
-                        EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
-  }
+// Centre text on the panel using the font's own metrics rather than a
+// hardcoded x, so the words stay centred if the font changes.
+static void drawCentered(UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg) {
+  int x = ((int)EPD_1IN54G_WIDTH - (int)(strlen(s) * font->Width)) / 2;
+  if (x < 0) x = 0;
+  Paint_DrawString_EN((UWORD)x, y, s, font, fg, bg);
 }
 
-// x offsets centre each word: 17 and 35 columns at 5px per column.
+// Farewell screen: three full-bleed colour bands in Font24 (17x24), plus a
+// decorative footer. Font24 is the largest vendored face, and "PLAYER" at
+// 6 chars is 102px, so every word clears the 200px panel comfortably.
+//
+// Colour pairings are chosen for contrast on a four-colour panel: white on
+// red, black on yellow, yellow on black. Red text on yellow would be the
+// weakest pairing of the set, so it is avoided.
+#define BAND_H 58
+
 static void renderGoodbye() {
   Paint_SelectImage(fb);
   Paint_Clear(EPD_1IN54G_WHITE);
-  drawArt(ART_SEA,    57, 32);
-  drawArt(ART_MP3,    57, 82);
-  drawArt(ART_PLAYER, 12, 132);
+
+  const UWORD W = EPD_1IN54G_WIDTH - 1;
+  const UWORD textPad = (BAND_H - 24) / 2;    // centre Font24 within a band
+
+  Paint_DrawRectangle(0, 0, W, BAND_H, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  drawCentered(textPad, "SEA", &Font24, EPD_1IN54G_WHITE, EPD_1IN54G_RED);
+
+  Paint_DrawRectangle(0, BAND_H, W, BAND_H * 2, EPD_1IN54G_YELLOW,
+                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  drawCentered(BAND_H + textPad, "MP3", &Font24, EPD_1IN54G_BLACK, EPD_1IN54G_YELLOW);
+
+  Paint_DrawRectangle(0, BAND_H * 2, W, BAND_H * 3, EPD_1IN54G_BLACK,
+                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  drawCentered(BAND_H * 2 + textPad, "PLAYER", &Font24, EPD_1IN54G_YELLOW,
+               EPD_1IN54G_BLACK);
+
+  // footer: repeating red / yellow / black tiles on white
+  for (int i = 0, x = 6; x + 14 <= 194; i++, x += 20) {
+    UWORD c = (i % 3 == 0) ? EPD_1IN54G_RED
+            : (i % 3 == 1) ? EPD_1IN54G_YELLOW
+                           : EPD_1IN54G_BLACK;
+    Paint_DrawRectangle(x, 180, x + 14, 194, c, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  }
+
   EPD_1IN54G_Display(fb);
 }
 
