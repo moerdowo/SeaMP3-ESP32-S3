@@ -237,44 +237,68 @@ static String displayName(const String &path) {
   return n;
 }
 
+#define MARGIN       6
+#define TITLE_H      26     // red header band
+#define BLOCK_TOP    30     // black band behind track number + song name
+#define BLOCK_BOTTOM 112
+#define NAME_COLS    17     // Font16 is 11px wide -> 17 columns across 200px
+#define NAME_LINES   3      // capped so the black band stays a fixed height
+
+// Right-align against the panel edge using the font's own width, so the text
+// stays put if the font ever changes.
+static void drawRight(UWORD y, const char *s, sFONT *font, UWORD fg) {
+  int x = (int)EPD_1IN54G_WIDTH - MARGIN - (int)(strlen(s) * font->Width);
+  if (x < 0) x = 0;
+  Paint_DrawString_EN((UWORD)x, y, s, font, fg, EPD_1IN54G_WHITE);
+}
+
 static void renderCard(const char *banner) {
   Paint_SelectImage(fb);
   Paint_Clear(EPD_1IN54G_WHITE);
 
-  // header
-  Paint_DrawRectangle(0, 0, 199, 26, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
-  Paint_DrawString_EN(6, 5, "MP3 PLAYER", &Font16, EPD_1IN54G_WHITE, EPD_1IN54G_RED);
+  // header: red band, white text
+  Paint_DrawRectangle(0, 0, EPD_1IN54G_WIDTH - 1, TITLE_H, EPD_1IN54G_RED,
+                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawString_EN(MARGIN, 5, "Sea MP3 Player", &Font16,
+                      EPD_1IN54G_WHITE, EPD_1IN54G_RED);
 
   if (banner) {
-    Paint_DrawString_EN(6, 90, banner, &Font16, EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
+    Paint_DrawString_EN(MARGIN, 90, banner, &Font16, EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
     EPD_1IN54G_Display(fb);
     return;
   }
 
+  // track number + song name: white text on a black band
+  Paint_DrawRectangle(0, BLOCK_TOP, EPD_1IN54G_WIDTH - 1, BLOCK_BOTTOM,
+                      EPD_1IN54G_BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+
   char line[40];
   snprintf(line, sizeof(line), "TRACK %d/%d", trackIdx + 1, (int)tracks.size());
-  Paint_DrawString_EN(6, 32, line, &Font12, EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
+  Paint_DrawString_EN(MARGIN, 34, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
 
-  // filename, Font16 is 11px wide -> 17 columns across a 200px panel
-  std::vector<String> lines = wrapText(displayName(tracks[trackIdx]), 17);
-  for (size_t i = 0; i < lines.size() && i < 4; i++) {
-    Paint_DrawString_EN(6, 50 + i * 18, lines[i].c_str(), &Font16,
-                        EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
+  std::vector<String> lines = wrapText(displayName(tracks[trackIdx]), NAME_COLS);
+  for (size_t i = 0; i < lines.size() && i < NAME_LINES; i++) {
+    Paint_DrawString_EN(MARGIN, 52 + i * 18, lines[i].c_str(), &Font16,
+                        EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
   }
 
-  Paint_DrawString_EN(6, 128, playing ? "> PLAYING" : "|| PAUSED", &Font16,
-                      playing ? EPD_1IN54G_BLACK : EPD_1IN54G_RED, EPD_1IN54G_WHITE);
+  // status: plain black text, no band
+  Paint_DrawString_EN(MARGIN, 124, playing ? "> PLAYING" : "|| PAUSED", &Font16,
+                      EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
 
   // volume bar
   int vol = VOLUME_STEPS[volIdx];
-  Paint_DrawRectangle(6, 154, 194, 172, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
-  int w = 6 + (188 * vol) / 100;
-  if (w > 7) {
-    Paint_DrawRectangle(7, 155, w, 171, EPD_1IN54G_YELLOW, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawRectangle(MARGIN, 154, 194, 172, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
+  int w = MARGIN + (188 * vol) / 100;
+  if (w > MARGIN + 1) {
+    Paint_DrawRectangle(MARGIN + 1, 155, w, 171, EPD_1IN54G_YELLOW,
+                        DOT_PIXEL_1X1, DRAW_FILL_FULL);
   }
+
+  // footer: volume hard left, hint hard right, both plain black on white
   snprintf(line, sizeof(line), "VOL %d", vol);
-  Paint_DrawString_EN(6, 178, line, &Font12, EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
-  Paint_DrawString_EN(96, 178, "BOOT=SKIP", &Font12, EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
+  Paint_DrawString_EN(MARGIN, 178, line, &Font12, EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
+  drawRight(178, "BOOT=SKIP", &Font12, EPD_1IN54G_BLACK);
 
   EPD_1IN54G_Display(fb);
 }
