@@ -20,6 +20,7 @@
 
 #include "ESP_I2S.h"
 #include "MP3DecoderHelix.h"
+#include "esp_sleep.h"
 using namespace libhelix;
 
 #include "es8311.h"
@@ -56,6 +57,7 @@ using namespace libhelix;
 #define MAX_TRACKS      256     // ponytail: flat cap, revisit if a card ever holds more
 #define READ_CHUNK      4096
 #define LONG_PRESS_MS   600
+#define SHUTDOWN_MS     1500    // PWR held this long -> power off
 #define DEBOUNCE_MS     40
 #define REDRAW_SETTLE_MS 2000   // let the track selection settle before a 15s refresh
 
@@ -79,6 +81,7 @@ static uint8_t  i2sChans = 0;
 
 static volatile bool     redrawPending = false;
 static volatile uint32_t lastChangeMs  = 0;
+static volatile bool     shutdownReq   = false;
 
 static UBYTE *fb = nullptr;              // e-paper framebuffer, 200*200 at 2bpp
 
@@ -303,9 +306,34 @@ static void renderCard(const char *banner) {
   EPD_1IN54G_Display(fb);
 }
 
+// Shut down and cut the battery rail. Runs on the display task because that
+// task owns the bit-banged panel SPI -- doing this from the button task could
+// land in the middle of a 15 s refresh and interleave two writers on the bus.
+// Never returns.
+static void powerOff() {
+  Serial.println("[power] shutting down");
+  digitalWrite(PIN_PA_CTRL, LOW);       // amp off
+  digitalWrite(PIN_AUDIO_PWR, HIGH);    // audio rail off (active low)
+
+  // Waveshare's own example clears the panel before sleeping it; leaving an
+  // image latched on a powered-down four-colour panel risks ghosting.
+  EPD_1IN54G_Init();
+  EPD_1IN54G_Clear(EPD_1IN54G_WHITE);
+  EPD_1IN54G_Sleep();
+  DEV_Delay_ms(2000);                   // vendor requires >=2 s before cutting the module
+  DEV_Module_Exit();
+
+  digitalWrite(PIN_VBAT_PWR, LOW);      // battery latch off -- no effect on USB power
+  Serial.println("[power] rail cut; deep sleep (USB keeps the chip alive)");
+  Serial.flush();
+  esp_deep_sleep_start();
+}
+
 static void displayTask(void *arg) {
   (void)arg;
   for (;;) {
+    if (shutdownReq) powerOff();        // does not return
+
     // Debounced: a refresh takes ~15s, so redrawing on every keypress would
     // leave the panel minutes behind the actual state.
     if (redrawPending && (millis() - lastChangeMs) > REDRAW_SETTLE_MS) {
@@ -332,8 +360,23 @@ static void pollButtons() {
   }
   bootDown = down;
 
+  // PWR: tap steps the volume, hold shuts down. Shutdown fires while the
+  // button is still held rather than on release, so the music cutting out is
+  // immediate confirmation that the hold registered.
+  static uint32_t pwrDownAt  = 0;
+  static bool     pwrHandled = false;
+
   bool p = (digitalRead(PIN_BTN_PWR) != pwrIdle);
-  if (p && !pwrDown) cycleVolume();
+  if (p && !pwrDown) { pwrDownAt = now; pwrHandled = false; }
+  if (p && !pwrHandled && (now - pwrDownAt) >= SHUTDOWN_MS) {
+    pwrHandled = true;
+    playing    = false;
+    digitalWrite(PIN_PA_CTRL, LOW);   // silence now; the panel and rail follow
+    shutdownReq = true;
+  }
+  if (!p && pwrDown && !pwrHandled && (now - pwrDownAt) >= DEBOUNCE_MS) {
+    cycleVolume();
+  }
   pwrDown = p;
 }
 

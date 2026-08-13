@@ -10,7 +10,13 @@ speaker, with a static "now playing" card on the 200x200 four-colour e-paper.
 |---|---|
 | BOOT (GPIO0) short press | next track |
 | BOOT long press (>= 600 ms) | play / pause |
-| PWR (GPIO18) press | volume 40 -> 60 -> 80 -> 100 |
+| PWR (GPIO18) short press | volume 40 -> 60 -> 80 -> 100 |
+| PWR long press (>= 1.5 s) | power off |
+
+Power-off silences the amp immediately, then clears and sleeps the panel
+before dropping the battery latch on GPIO17. **On USB power the rail cannot
+actually be cut** — USB feeds it past the latch — so the board enters deep
+sleep instead and stays quiet until you unplug or reset it.
 
 ## SD card
 
