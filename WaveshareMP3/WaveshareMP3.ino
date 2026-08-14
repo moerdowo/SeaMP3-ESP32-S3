@@ -63,7 +63,10 @@ using namespace libhelix;
 #define DEBOUNCE_MS     40
 #define REDRAW_SETTLE_MS 2000   // let the track selection settle before a 15s refresh
 
-static const int VOLUME_STEPS[] = {40, 60, 80, 100};
+// Steps of 10 rather than 20. PWR only cycles upward and wraps, so each extra
+// step is another press to get back around; 8 keeps the trip from 100 back
+// down to 30 short enough to live with.
+static const int VOLUME_STEPS[] = {30, 40, 50, 60, 70, 80, 90, 100};
 #define VOLUME_STEP_COUNT (sizeof(VOLUME_STEPS) / sizeof(VOLUME_STEPS[0]))
 
 // ------------------------------------------------------------------- state --
@@ -76,7 +79,7 @@ static volatile int  trackIdx  = 0;
 static volatile bool playing   = true;
 static volatile bool skipReq   = false;  // set by buttons, consumed by the audio task
 static volatile int  volumeReq = -1;     // pending volume; only the audio task talks I2C
-static int           volIdx    = 1;      // -> 60
+static int           volIdx    = 3;      // -> 60, unchanged default
 
 static uint32_t i2sRate  = 0;            // 0 = I2S not yet started
 static uint8_t  i2sChans = 0;

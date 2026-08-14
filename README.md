@@ -10,7 +10,7 @@ speaker, with a static "now playing" card on the 200x200 four-colour e-paper.
 |---|---|
 | BOOT (GPIO0) short press | next track |
 | BOOT long press (>= 600 ms) | play / pause |
-| PWR (GPIO18) short press | volume 40 -> 60 -> 80 -> 100 |
+| PWR (GPIO18) short press | volume 30 -> 40 -> ... -> 100 in steps of 10, then wraps |
 | PWR long press (>= 1.5 s) | power off |
 
 Power-off silences the amp immediately, then clears and sleeps the panel
