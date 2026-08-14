@@ -58,6 +58,7 @@ using namespace libhelix;
 #define READ_CHUNK      4096
 #define LONG_PRESS_MS   600
 #define SHUTDOWN_MS     1500    // PWR held this long -> power off
+#define BTN_ARM_MS      4000    // ignore buttons until the power-on press is released
 #define DEBOUNCE_MS     40
 #define REDRAW_SETTLE_MS 2000   // let the track selection settle before a 15s refresh
 
@@ -249,10 +250,10 @@ static String displayName(const String &path) {
 
 // Right-align against the panel edge using the font's own width, so the text
 // stays put if the font ever changes.
-static void drawRight(UWORD y, const char *s, sFONT *font, UWORD fg) {
+static void drawRight(UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg) {
   int x = (int)EPD_1IN54G_WIDTH - MARGIN - (int)(strlen(s) * font->Width);
   if (x < 0) x = 0;
-  Paint_DrawString_EN((UWORD)x, y, s, font, fg, EPD_1IN54G_WHITE);
+  Paint_DrawString_EN((UWORD)x, y, s, font, fg, bg);
 }
 
 static void renderCard(const char *banner) {
@@ -266,7 +267,9 @@ static void renderCard(const char *banner) {
                       EPD_1IN54G_WHITE, EPD_1IN54G_RED);
 
   if (banner) {
-    Paint_DrawString_EN(MARGIN, 90, banner, &Font16, EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
+    Paint_DrawRectangle(0, 86, EPD_1IN54G_WIDTH - 1, 112, EPD_1IN54G_RED,
+                        DOT_PIXEL_1X1, DRAW_FILL_FULL);
+    Paint_DrawString_EN(MARGIN, 91, banner, &Font16, EPD_1IN54G_WHITE, EPD_1IN54G_RED);
     EPD_1IN54G_Display(fb);
     return;
   }
@@ -285,23 +288,32 @@ static void renderCard(const char *banner) {
                         EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
   }
 
-  // status: plain black text, no band
-  Paint_DrawString_EN(MARGIN, 124, playing ? "> PLAYING" : "|| PAUSED", &Font16,
-                      EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
+  const UWORD W = EPD_1IN54G_WIDTH - 1;
 
-  // volume bar
+  // status band: red while playing, black when paused, white text either way.
+  // The colour carries the state as well as the label does.
+  UWORD statusBg = playing ? EPD_1IN54G_RED : EPD_1IN54G_BLACK;
+  Paint_DrawRectangle(0, 116, W, 142, statusBg, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawString_EN(MARGIN, 121, playing ? "> PLAYING" : "|| PAUSED", &Font16,
+                      EPD_1IN54G_WHITE, statusBg);
+
+  // volume band: yellow fill in a white-outlined trough on black, readouts in
+  // white underneath. Yellow is the only colour left for the bar -- white text
+  // is illegible on it, so it carries no lettering.
+  Paint_DrawRectangle(0, 146, W, EPD_1IN54G_HEIGHT - 1, EPD_1IN54G_BLACK,
+                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
+
   int vol = VOLUME_STEPS[volIdx];
-  Paint_DrawRectangle(MARGIN, 154, 194, 172, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
+  Paint_DrawRectangle(MARGIN, 152, 194, 168, EPD_1IN54G_WHITE, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
   int w = MARGIN + (188 * vol) / 100;
   if (w > MARGIN + 1) {
-    Paint_DrawRectangle(MARGIN + 1, 155, w, 171, EPD_1IN54G_YELLOW,
+    Paint_DrawRectangle(MARGIN + 1, 153, w, 167, EPD_1IN54G_YELLOW,
                         DOT_PIXEL_1X1, DRAW_FILL_FULL);
   }
 
-  // footer: volume hard left, hint hard right, both plain black on white
   snprintf(line, sizeof(line), "VOL %d", vol);
-  Paint_DrawString_EN(MARGIN, 178, line, &Font12, EPD_1IN54G_BLACK, EPD_1IN54G_WHITE);
-  drawRight(178, "BOOT=SKIP", &Font12, EPD_1IN54G_BLACK);
+  Paint_DrawString_EN(MARGIN, 174, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
+  drawRight(174, "BOOT=SKIP", &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
 
   EPD_1IN54G_Display(fb);
 }
@@ -397,6 +409,25 @@ static void displayTask(void *arg) {
 // ----------------------------------------------------------------- buttons --
 static void pollButtons() {
   uint32_t now = millis();
+
+  // The board is powered on BY the PWR button, so the button is usually still
+  // held while setup() runs. Sampling the idle level there recorded "pressed"
+  // as idle and inverted the logic: once released, the line read as a
+  // permanent hold, and SHUTDOWN_MS later the shutdown path fired and switched
+  // the board straight back off -- the "turns itself off, press again"
+  // symptom. Keep re-sampling and ignore input until the press is long gone.
+  static bool armed = false;
+  if (!armed) {
+    if (now < BTN_ARM_MS) {
+      bootIdle = digitalRead(PIN_BTN_BOOT);
+      pwrIdle  = digitalRead(PIN_BTN_PWR);
+      bootDown = false;
+      pwrDown  = false;
+      return;
+    }
+    armed = true;
+    Serial.printf("[btn] armed; idle BOOT=%d PWR=%d\n", bootIdle, pwrIdle);
+  }
 
   bool down = (digitalRead(PIN_BTN_BOOT) != bootIdle);
   if (down && !bootDown) bootDownAt = now;
