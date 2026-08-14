@@ -350,11 +350,9 @@ static void drawCentered(UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg
 // Colour pairings are chosen for contrast on a four-colour panel: white on
 // red, black on yellow, yellow on black. Red text on yellow would be the
 // weakest pairing of the set, so it is avoided.
-#define BAND_H 58
 
 static void renderGoodbye() {
   const UWORD W = EPD_1IN54G_WIDTH - 1;
-  const UWORD H = EPD_1IN54G_HEIGHT - 1;
 
   Paint_SelectImage(fb);
   Paint_Clear(EPD_1IN54G_YELLOW);   // yellow shows through as the stripes below
@@ -373,7 +371,6 @@ static void renderGoodbye() {
     drawCentered(r.top + (r.bottom - r.top - Font24.Height) / 2, r.word, &Font24,
                  EPD_1IN54G_WHITE, r.bg);
   }
-  (void)H;
 
   EPD_1IN54G_Display(fb);
 }
