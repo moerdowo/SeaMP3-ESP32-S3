@@ -372,8 +372,22 @@ static void drawCat() {
   Paint_DrawCircle(116, 56, 2, EPD_1IN54G_WHITE, DOT_PIXEL_1X1, DRAW_FILL_FULL);
 
   Paint_DrawCircle(100, 72, 4, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
-  Paint_DrawLine(100, 76, 93,  82, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-  Paint_DrawLine(100, 76, 107, 82, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+
+  // Mouth: the classic cat double-curve. Both halves must finish ABOVE where
+  // they start -- two lines simply running down from the nose read as a frown,
+  // which is what made the first cat look miserable. GUI_Paint has no arc, so
+  // each half is a 3-segment polyline that dips then lifts.
+  Paint_DrawLine(100, 76, 100, 80, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+  const int smile[2][6] = { { 100, 80,  95, 84,  89, 80 },      // left half
+                            { 100, 80, 105, 84, 111, 80 } };    // right half
+  for (auto &s : smile) {
+    Paint_DrawLine(s[0], s[1], s[2], s[3], EPD_1IN54G_BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    Paint_DrawLine(s[2], s[3], s[4], s[5], EPD_1IN54G_BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+  }
+
+  // cheeks, clear of both the whisker roots (x<=72) and the smile (x>=89)
+  Paint_DrawCircle(80,  78, 4, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawCircle(120, 78, 4, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
 
   const int wk[3][4] = { {72, 70, 48, 64}, {72, 75, 46, 75}, {72, 80, 48, 88} };
   for (auto &s : wk) {
