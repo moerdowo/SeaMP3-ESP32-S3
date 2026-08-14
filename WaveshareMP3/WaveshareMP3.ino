@@ -254,12 +254,22 @@ static String displayName(const String &path) {
 #define NAME_COLS     17    // Font16 is 11px wide -> 17 columns across 200px
 #define NAME_LINES    3     // capped so the black band stays a fixed height
 
+// Waveshare's Paint_DrawString_EN forwards its arguments to Paint_DrawChar as
+// (Color_Background, Color_Foreground) -- swapped relative to its own parameter
+// names, see GUI_Paint.cpp:590. So its 5th argument paints the character cell
+// and its 6th paints the strokes. Every string drawn through it directly comes
+// out inverted: coloured letters inside a white box. Wrap it once here so call
+// sites can read as plain (foreground, background).
+static void drawText(UWORD x, UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg) {
+  Paint_DrawString_EN(x, y, s, font, bg, fg);   // deliberately swapped, see above
+}
+
 // Right-align against the panel edge using the font's own width, so the text
 // stays put if the font ever changes.
 static void drawRight(UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg) {
   int x = (int)EPD_1IN54G_WIDTH - MARGIN - (int)(strlen(s) * font->Width);
   if (x < 0) x = 0;
-  Paint_DrawString_EN((UWORD)x, y, s, font, fg, bg);
+  drawText((UWORD)x, y, s, font, fg, bg);
 }
 
 static void renderCard(const char *banner) {
@@ -272,12 +282,12 @@ static void renderCard(const char *banner) {
 
   // header: red band, white text
   Paint_DrawRectangle(0, 0, W, TITLE_H, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
-  Paint_DrawString_EN(MARGIN, 5, "Sea MP3 Player", &Font16,
+  drawText(MARGIN, 5, "Sea MP3 Player", &Font16,
                       EPD_1IN54G_WHITE, EPD_1IN54G_RED);
 
   if (banner) {
     Paint_DrawRectangle(0, 86, W, 112, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
-    Paint_DrawString_EN(MARGIN, 91, banner, &Font16, EPD_1IN54G_WHITE, EPD_1IN54G_RED);
+    drawText(MARGIN, 91, banner, &Font16, EPD_1IN54G_WHITE, EPD_1IN54G_RED);
     EPD_1IN54G_Display(fb);
     return;
   }
@@ -288,11 +298,11 @@ static void renderCard(const char *banner) {
 
   char line[40];
   snprintf(line, sizeof(line), "TRACK %d/%d", trackIdx + 1, (int)tracks.size());
-  Paint_DrawString_EN(MARGIN, 31, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
+  drawText(MARGIN, 31, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
 
   std::vector<String> lines = wrapText(displayName(tracks[trackIdx]), NAME_COLS);
   for (size_t i = 0; i < lines.size() && i < NAME_LINES; i++) {
-    Paint_DrawString_EN(MARGIN, 48 + i * 18, lines[i].c_str(), &Font16,
+    drawText(MARGIN, 48 + i * 18, lines[i].c_str(), &Font16,
                         EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
   }
 
@@ -301,7 +311,7 @@ static void renderCard(const char *banner) {
   UWORD statusBg = playing ? EPD_1IN54G_RED : EPD_1IN54G_BLACK;
   Paint_DrawRectangle(0, STATUS_TOP, W, STATUS_BOTTOM, statusBg,
                       DOT_PIXEL_1X1, DRAW_FILL_FULL);
-  Paint_DrawString_EN(MARGIN, 120, playing ? "> PLAYING" : "|| PAUSED", &Font16,
+  drawText(MARGIN, 120, playing ? "> PLAYING" : "|| PAUSED", &Font16,
                       EPD_1IN54G_WHITE, statusBg);
 
   // volume band: yellow trough on black, readouts in white beneath it. The
@@ -319,7 +329,7 @@ static void renderCard(const char *banner) {
   }
 
   snprintf(line, sizeof(line), "VOL %d", vol);
-  Paint_DrawString_EN(MARGIN, 172, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
+  drawText(MARGIN, 172, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
   drawRight(172, "BOOT=SKIP", &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
 
   EPD_1IN54G_Display(fb);
@@ -330,7 +340,7 @@ static void renderCard(const char *banner) {
 static void drawCentered(UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg) {
   int x = ((int)EPD_1IN54G_WIDTH - (int)(strlen(s) * font->Width)) / 2;
   if (x < 0) x = 0;
-  Paint_DrawString_EN((UWORD)x, y, s, font, fg, bg);
+  drawText((UWORD)x, y, s, font, fg, bg);
 }
 
 // Farewell screen: three full-bleed colour bands in Font24 (17x24), plus a
@@ -343,31 +353,27 @@ static void drawCentered(UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg
 #define BAND_H 58
 
 static void renderGoodbye() {
-  Paint_SelectImage(fb);
-  Paint_Clear(EPD_1IN54G_WHITE);
-
   const UWORD W = EPD_1IN54G_WIDTH - 1;
-  const UWORD textPad = (BAND_H - 24) / 2;    // centre Font24 within a band
+  const UWORD H = EPD_1IN54G_HEIGHT - 1;
 
-  Paint_DrawRectangle(0, 0, W, BAND_H, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
-  drawCentered(textPad, "SEA", &Font24, EPD_1IN54G_WHITE, EPD_1IN54G_RED);
+  Paint_SelectImage(fb);
+  Paint_Clear(EPD_1IN54G_YELLOW);   // yellow shows through as the stripes below
 
-  Paint_DrawRectangle(0, BAND_H, W, BAND_H * 2, EPD_1IN54G_YELLOW,
-                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
-  drawCentered(BAND_H + textPad, "MP3", &Font24, EPD_1IN54G_BLACK, EPD_1IN54G_YELLOW);
+  // All three words are white, so every band behind them must be dark: white
+  // on yellow is the one unreadable pairing on this panel. Yellow still
+  // appears, as the stripes the clear leaves between the bands.
+  struct { UWORD top, bottom, bg; const char *word; } rows[] = {
+    {   0,  58, EPD_1IN54G_RED,   "SEA"    },
+    {  68, 126, EPD_1IN54G_BLACK, "MP3"    },
+    { 136, 194, EPD_1IN54G_RED,   "PLAYER" },
+  };
 
-  Paint_DrawRectangle(0, BAND_H * 2, W, BAND_H * 3, EPD_1IN54G_BLACK,
-                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
-  drawCentered(BAND_H * 2 + textPad, "PLAYER", &Font24, EPD_1IN54G_YELLOW,
-               EPD_1IN54G_BLACK);
-
-  // footer: repeating red / yellow / black tiles on white
-  for (int i = 0, x = 6; x + 14 <= 194; i++, x += 20) {
-    UWORD c = (i % 3 == 0) ? EPD_1IN54G_RED
-            : (i % 3 == 1) ? EPD_1IN54G_YELLOW
-                           : EPD_1IN54G_BLACK;
-    Paint_DrawRectangle(x, 180, x + 14, 194, c, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  for (auto &r : rows) {
+    Paint_DrawRectangle(0, r.top, W, r.bottom, r.bg, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+    drawCentered(r.top + (r.bottom - r.top - Font24.Height) / 2, r.word, &Font24,
+                 EPD_1IN54G_WHITE, r.bg);
   }
+  (void)H;
 
   EPD_1IN54G_Display(fb);
 }
