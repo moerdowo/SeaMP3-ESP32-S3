@@ -59,6 +59,7 @@ using namespace libhelix;
 #define LONG_PRESS_MS   600
 #define SHUTDOWN_MS     1500    // PWR held this long -> power off
 #define BTN_ARM_MS      4000    // ignore buttons until the power-on press is released
+#define PWR_STABLE_MS   1500    // ...and until PWR has been still this long
 #define DEBOUNCE_MS     40
 #define REDRAW_SETTLE_MS 2000   // let the track selection settle before a 15s refresh
 
@@ -241,12 +242,17 @@ static String displayName(const String &path) {
   return n;
 }
 
-#define MARGIN       6
-#define TITLE_H      26     // red header band
-#define BLOCK_TOP    30     // black band behind track number + song name
-#define BLOCK_BOTTOM 112
-#define NAME_COLS    17     // Font16 is 11px wide -> 17 columns across 200px
-#define NAME_LINES   3      // capped so the black band stays a fixed height
+// Bands are contiguous: each one starts exactly where the previous ends, so no
+// panel white shows between them. Every pixel of the card belongs to a band.
+#define MARGIN        6
+#define TITLE_H       26    // red header, 0..26
+#define BLOCK_TOP     27    // black band behind track number + song name
+#define BLOCK_BOTTOM  112
+#define STATUS_TOP    113   // status band, red playing / black paused
+#define STATUS_BOTTOM 143
+#define VOL_TOP       144   // black band: level bar + readouts
+#define NAME_COLS     17    // Font16 is 11px wide -> 17 columns across 200px
+#define NAME_LINES    3     // capped so the black band stays a fixed height
 
 // Right-align against the panel edge using the font's own width, so the text
 // stays put if the font ever changes.
@@ -257,63 +263,64 @@ static void drawRight(UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg) {
 }
 
 static void renderCard(const char *banner) {
+  const UWORD W = EPD_1IN54G_WIDTH - 1;
+  const UWORD H = EPD_1IN54G_HEIGHT - 1;
+
   Paint_SelectImage(fb);
-  Paint_Clear(EPD_1IN54G_WHITE);
+  Paint_Clear(EPD_1IN54G_BLACK);   // black, not white: any pixel the bands miss
+                                   // stays dark instead of showing panel white
 
   // header: red band, white text
-  Paint_DrawRectangle(0, 0, EPD_1IN54G_WIDTH - 1, TITLE_H, EPD_1IN54G_RED,
-                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawRectangle(0, 0, W, TITLE_H, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
   Paint_DrawString_EN(MARGIN, 5, "Sea MP3 Player", &Font16,
                       EPD_1IN54G_WHITE, EPD_1IN54G_RED);
 
   if (banner) {
-    Paint_DrawRectangle(0, 86, EPD_1IN54G_WIDTH - 1, 112, EPD_1IN54G_RED,
-                        DOT_PIXEL_1X1, DRAW_FILL_FULL);
+    Paint_DrawRectangle(0, 86, W, 112, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
     Paint_DrawString_EN(MARGIN, 91, banner, &Font16, EPD_1IN54G_WHITE, EPD_1IN54G_RED);
     EPD_1IN54G_Display(fb);
     return;
   }
 
   // track number + song name: white text on a black band
-  Paint_DrawRectangle(0, BLOCK_TOP, EPD_1IN54G_WIDTH - 1, BLOCK_BOTTOM,
-                      EPD_1IN54G_BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawRectangle(0, BLOCK_TOP, W, BLOCK_BOTTOM, EPD_1IN54G_BLACK,
+                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
 
   char line[40];
   snprintf(line, sizeof(line), "TRACK %d/%d", trackIdx + 1, (int)tracks.size());
-  Paint_DrawString_EN(MARGIN, 34, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
+  Paint_DrawString_EN(MARGIN, 31, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
 
   std::vector<String> lines = wrapText(displayName(tracks[trackIdx]), NAME_COLS);
   for (size_t i = 0; i < lines.size() && i < NAME_LINES; i++) {
-    Paint_DrawString_EN(MARGIN, 52 + i * 18, lines[i].c_str(), &Font16,
+    Paint_DrawString_EN(MARGIN, 48 + i * 18, lines[i].c_str(), &Font16,
                         EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
   }
-
-  const UWORD W = EPD_1IN54G_WIDTH - 1;
 
   // status band: red while playing, black when paused, white text either way.
   // The colour carries the state as well as the label does.
   UWORD statusBg = playing ? EPD_1IN54G_RED : EPD_1IN54G_BLACK;
-  Paint_DrawRectangle(0, 116, W, 142, statusBg, DOT_PIXEL_1X1, DRAW_FILL_FULL);
-  Paint_DrawString_EN(MARGIN, 121, playing ? "> PLAYING" : "|| PAUSED", &Font16,
+  Paint_DrawRectangle(0, STATUS_TOP, W, STATUS_BOTTOM, statusBg,
+                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawString_EN(MARGIN, 120, playing ? "> PLAYING" : "|| PAUSED", &Font16,
                       EPD_1IN54G_WHITE, statusBg);
 
-  // volume band: yellow fill in a white-outlined trough on black, readouts in
-  // white underneath. Yellow is the only colour left for the bar -- white text
-  // is illegible on it, so it carries no lettering.
-  Paint_DrawRectangle(0, 146, W, EPD_1IN54G_HEIGHT - 1, EPD_1IN54G_BLACK,
-                      DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  // volume band: yellow trough on black, readouts in white beneath it. The
+  // trough outline is yellow rather than white so the only white left on the
+  // card is the lettering itself.
+  Paint_DrawRectangle(0, VOL_TOP, W, H, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);
 
   int vol = VOLUME_STEPS[volIdx];
-  Paint_DrawRectangle(MARGIN, 152, 194, 168, EPD_1IN54G_WHITE, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
+  Paint_DrawRectangle(MARGIN, 150, 194, 166, EPD_1IN54G_YELLOW,
+                      DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
   int w = MARGIN + (188 * vol) / 100;
   if (w > MARGIN + 1) {
-    Paint_DrawRectangle(MARGIN + 1, 153, w, 167, EPD_1IN54G_YELLOW,
+    Paint_DrawRectangle(MARGIN + 1, 151, w, 165, EPD_1IN54G_YELLOW,
                         DOT_PIXEL_1X1, DRAW_FILL_FULL);
   }
 
   snprintf(line, sizeof(line), "VOL %d", vol);
-  Paint_DrawString_EN(MARGIN, 174, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
-  drawRight(174, "BOOT=SKIP", &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
+  Paint_DrawString_EN(MARGIN, 172, line, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
+  drawRight(172, "BOOT=SKIP", &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
 
   EPD_1IN54G_Display(fb);
 }
@@ -416,17 +423,26 @@ static void pollButtons() {
   // permanent hold, and SHUTDOWN_MS later the shutdown path fired and switched
   // the board straight back off -- the "turns itself off, press again"
   // symptom. Keep re-sampling and ignore input until the press is long gone.
-  static bool armed = false;
+  static bool     armed       = false;
+  static int      lastPwr     = -1;
+  static uint32_t pwrStableAt = 0;
   if (!armed) {
-    if (now < BTN_ARM_MS) {
-      bootIdle = digitalRead(PIN_BTN_BOOT);
-      pwrIdle  = digitalRead(PIN_BTN_PWR);
-      bootDown = false;
-      pwrDown  = false;
-      return;
+    int p = digitalRead(PIN_BTN_PWR);
+    if (p != lastPwr) { lastPwr = p; pwrStableAt = now; }
+    bootIdle = digitalRead(PIN_BTN_BOOT);
+    pwrIdle  = p;
+    bootDown = false;
+    pwrDown  = false;
+
+    // Arm only once the line has been quiet for a while, not merely once a
+    // fixed delay has passed: holding PWR for longer than the delay would
+    // otherwise capture "pressed" as the idle level and invert the logic all
+    // over again. Waiting for stillness works however long the press lasts.
+    if (now >= BTN_ARM_MS && (now - pwrStableAt) >= PWR_STABLE_MS) {
+      armed = true;
+      Serial.printf("[btn] armed; idle BOOT=%d PWR=%d\n", bootIdle, pwrIdle);
     }
-    armed = true;
-    Serial.printf("[btn] armed; idle BOOT=%d PWR=%d\n", bootIdle, pwrIdle);
+    return;
   }
 
   bool down = (digitalRead(PIN_BTN_BOOT) != bootIdle);
@@ -553,9 +569,13 @@ void setup() {
   if (!fb) return;
 
   EPD_1IN54G_Init();
-  EPD_1IN54G_Clear(EPD_1IN54G_WHITE);
   Paint_NewImage(fb, EPD_1IN54G_WIDTH, EPD_1IN54G_HEIGHT, 0, EPD_1IN54G_WHITE);
   Paint_SetScale(4);
+
+  // No Clear() before the first card: Clear is itself a full ~20 s refresh
+  // that paints a solid colour, and renderCard's Display() already drives
+  // every pixel. Running both left the previous shutdown screen on the panel
+  // for ~40 s after power-on, which reads as "it turned itself back off".
 
   const char *banner = nullptr;
   if (!sdOk)               banner = "NO SD CARD";
