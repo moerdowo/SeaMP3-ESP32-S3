@@ -343,27 +343,64 @@ static void drawCentered(UWORD y, const char *s, sFONT *font, UWORD fg, UWORD bg
   drawText((UWORD)x, y, s, font, fg, bg);
 }
 
-// Farewell screen: three full-bleed colour bands in Font24 (17x24), plus a
-// decorative footer. Font24 is the largest vendored face, and "PLAYER" at
-// 6 chars is 102px, so every word clears the 200px panel comfortably.
-//
-// Colour pairings are chosen for contrast on a four-colour panel: white on
-// red, black on yellow, yellow on black. Red text on yellow would be the
-// weakest pairing of the set, so it is avoided.
+// Filled isoceles triangle: apex at (ax, ay), widening to half-width hw by
+// y = by. GUI_Paint has no triangle primitive, so scan it out as rows.
+static void fillEar(int ax, int ay, int by, int hw, UWORD c) {
+  int h = by - ay;
+  if (h <= 0) return;
+  for (int y = 0; y <= h; y++) {
+    int w = hw * y / h;
+    Paint_DrawLine(ax - w, ay + y, ax + w, ay + y, c, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+  }
+}
 
+// Cat head, occupying y 0..99 on a red field. The head is yellow so all four
+// panel colours appear. The whiskers run off the head onto the field, which is
+// why the field is red and not black -- black whiskers would vanish into it.
+static void drawCat() {
+  fillEar(78,  6, 40, 17, EPD_1IN54G_YELLOW);   // ears first, so the head then
+  fillEar(122, 6, 40, 17, EPD_1IN54G_YELLOW);   // merges over their base
+  Paint_DrawCircle(100, 62, 33, EPD_1IN54G_YELLOW, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  // Inner ears are white, not red: on a red field a red inner ear disappears
+  // and the ears read as hollow outlines instead of solid ones.
+  fillEar(78,  16, 34, 9, EPD_1IN54G_WHITE);
+  fillEar(122, 16, 34, 9, EPD_1IN54G_WHITE);
+
+  Paint_DrawCircle(86,  58, 5, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawCircle(114, 58, 5, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawCircle(88,  56, 2, EPD_1IN54G_WHITE, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawCircle(116, 56, 2, EPD_1IN54G_WHITE, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+
+  Paint_DrawCircle(100, 72, 4, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+  Paint_DrawLine(100, 76, 93,  82, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+  Paint_DrawLine(100, 76, 107, 82, EPD_1IN54G_BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+
+  const int wk[3][4] = { {72, 70, 48, 64}, {72, 75, 46, 75}, {72, 80, 48, 88} };
+  for (auto &s : wk) {
+    Paint_DrawLine(s[0], s[1], s[2], s[3], EPD_1IN54G_BLACK,
+                   DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    Paint_DrawLine(200 - s[0], s[1], 200 - s[2], s[3], EPD_1IN54G_BLACK,
+                   DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+  }
+}
+
+// Farewell screen: cat head over three Font24 (17x24) word bands. "PLAYER" at
+// 6 chars is 102px and "MUSIC" 85px, so both clear the 200px panel.
+//
+// Every word is white, so each band behind one has to be red or black: white
+// on yellow is the one unreadable pairing on a four-colour panel. Yellow
+// carries the cat instead, which keeps all four colours on screen.
 static void renderGoodbye() {
   const UWORD W = EPD_1IN54G_WIDTH - 1;
 
   Paint_SelectImage(fb);
-  Paint_Clear(EPD_1IN54G_YELLOW);   // yellow shows through as the stripes below
+  Paint_Clear(EPD_1IN54G_RED);
+  drawCat();
 
-  // All three words are white, so every band behind them must be dark: white
-  // on yellow is the one unreadable pairing on this panel. Yellow still
-  // appears, as the stripes the clear leaves between the bands.
   struct { UWORD top, bottom, bg; const char *word; } rows[] = {
-    {   0,  58, EPD_1IN54G_RED,   "SEA"    },
-    {  68, 126, EPD_1IN54G_BLACK, "MP3"    },
-    { 136, 194, EPD_1IN54G_RED,   "PLAYER" },
+    { 100, 132, EPD_1IN54G_BLACK, "SEA"    },
+    { 133, 165, EPD_1IN54G_RED,   "MUSIC"  },
+    { 166, 199, EPD_1IN54G_BLACK, "PLAYER" },
   };
 
   for (auto &r : rows) {
