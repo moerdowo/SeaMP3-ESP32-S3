@@ -27,6 +27,7 @@ using namespace libhelix;
 #include "EPD_1in54g.h"
 #include "GUI_Paint.h"
 #include "fonts.h"
+#include "adc_bsp.h"
 
 // ---------------------------------------------------------------- pin map --
 // Taken from Waveshare's 07_Audio_out, 04_SD_Card, 08_E_paper_test and
@@ -61,12 +62,19 @@ using namespace libhelix;
 #define BTN_ARM_MS      4000    // ignore buttons until the power-on press is released
 #define PWR_STABLE_MS   1500    // ...and until PWR has been still this long
 #define DEBOUNCE_MS     40
+
+// Battery cutoff. The shutdown sequence has to repaint and sleep the panel,
+// which takes ~20 s, so this must trip while there is still charge to finish
+// it -- 3.40 V on a Li-ion leaves that margin. The amp draws in bursts and
+// sags the rail momentarily, so a single low reading is not enough to act on.
+#define LOW_BATT_V       3.40f
+#define LOW_BATT_SAMPLES 5
+#define BATT_POLL_MS     1000
 #define REDRAW_SETTLE_MS 2000   // let the track selection settle before a 15s refresh
 
-// Steps of 10 rather than 20. PWR only cycles upward and wraps, so each extra
-// step is another press to get back around; 8 keeps the trip from 100 back
-// down to 30 short enough to live with.
-static const int VOLUME_STEPS[] = {30, 40, 50, 60, 70, 80, 90, 100};
+// Steps of 10, capped at 80. PWR only cycles upward and wraps, so each extra
+// step is another press to get back around.
+static const int VOLUME_STEPS[] = {30, 40, 50, 60, 70, 80};
 #define VOLUME_STEP_COUNT (sizeof(VOLUME_STEPS) / sizeof(VOLUME_STEPS[0]))
 
 // ------------------------------------------------------------------- state --
@@ -601,6 +609,12 @@ void setup() {
   pwrIdle  = digitalRead(PIN_BTN_PWR);
   Serial.printf("[btn] idle levels BOOT=%d PWR=%d\n", bootIdle, pwrIdle);
 
+  adc_bsp_init();
+  float vbat = 0;
+  adc_get_value(&vbat, NULL);
+  Serial.printf("[power] battery %.2f V\n", vbat);
+  selftest("battery", vbat > 0.5f);
+
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   bool codecOk = codecInit();
   selftest("es8311", codecOk);
@@ -651,7 +665,36 @@ void setup() {
   xTaskCreatePinnedToCore(displayTask, "display", 8192, NULL, 2, NULL, 0);
 }
 
+// Run the normal shutdown before the battery collapses. Without this the chip
+// browns out mid-playback with the panel never slept, and e-paper holds its
+// last image with no power -- so the card stays frozen on screen and the
+// device looks stuck. Waveshare also warn against leaving the panel un-slept.
+static void checkBattery() {
+  static uint32_t lastPoll = 0;
+  static int      lowCount = 0;
+
+  uint32_t now = millis();
+  if (now - lastPoll < BATT_POLL_MS) return;
+  lastPoll = now;
+
+  float v = 0;
+  adc_get_value(&v, NULL);
+  if (v < 0.5f) return;            // no plausible reading; do not act on it
+
+  if (v >= LOW_BATT_V) { lowCount = 0; return; }
+
+  // Sustained, not a momentary sag from an amp current burst.
+  if (++lowCount < LOW_BATT_SAMPLES || shutdownReq) return;
+
+  Serial.printf("[power] battery %.2f V for %d s, shutting down cleanly\n",
+                v, LOW_BATT_SAMPLES);
+  playing = false;
+  digitalWrite(PIN_PA_CTRL, LOW);   // silence now, buying power for the repaint
+  shutdownReq = true;
+}
+
 void loop() {
   pollButtons();
+  checkBattery();
   delay(20);
 }

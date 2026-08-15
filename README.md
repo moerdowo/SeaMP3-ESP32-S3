@@ -10,8 +10,15 @@ speaker, with a static "now playing" card on the 200x200 four-colour e-paper.
 |---|---|
 | BOOT (GPIO0) short press | next track |
 | BOOT long press (>= 600 ms) | play / pause |
-| PWR (GPIO18) short press | volume 30 -> 40 -> ... -> 100 in steps of 10, then wraps |
+| PWR (GPIO18) short press | volume 30 -> 40 -> ... -> 80 in steps of 10, then wraps |
 | PWR long press (>= 1.5 s) | power off |
+
+The battery is polled once a second. Below 3.40 V for 5 consecutive readings
+the firmware runs the same clean shutdown by itself, rather than letting the
+chip brown out with the panel un-slept — e-paper holds its last image with no
+power, so a collapse leaves the card frozen on screen and the device looks
+stuck. Five readings are required because the amplifier draws in bursts and
+sags the rail momentarily.
 
 Power-off silences the amp immediately, then clears and sleeps the panel
 before dropping the battery latch on GPIO17. **On USB power the rail cannot
