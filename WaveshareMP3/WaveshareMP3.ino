@@ -95,6 +95,7 @@ static uint8_t  i2sChans = 0;
 static volatile bool     redrawPending = false;
 static volatile uint32_t lastChangeMs  = 0;
 static volatile bool     shutdownReq   = false;
+static volatile int      battPct       = -1;   // -1 until the first ADC read
 
 static UBYTE *fb = nullptr;              // e-paper framebuffer, 200*200 at 2bpp
 
@@ -295,6 +296,21 @@ static void renderCard(const char *banner) {
   Paint_DrawRectangle(0, 0, W, TITLE_H, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
   drawText(MARGIN, 5, "Sea MP3 Player", &Font16,
                       EPD_1IN54G_WHITE, EPD_1IN54G_RED);
+
+  // Battery badge, top right, on black so it reads as its own element against
+  // the red header. Yellow was the other non-red option but would need black
+  // lettering, breaking the white-text rule the rest of the card follows.
+  // The title ends at x=160; "100%" in Font12 is 28px, so the widest badge
+  // starts at x=164 and still clears it.
+  if (battPct >= 0) {
+    char bat[8];
+    snprintf(bat, sizeof(bat), "%d%%", battPct);
+    int tw = (int)(strlen(bat) * Font12.Width);
+    int x0 = (int)EPD_1IN54G_WIDTH - 8 - tw;
+    Paint_DrawRectangle(x0, 4, EPD_1IN54G_WIDTH - 5, 22, EPD_1IN54G_BLACK,
+                        DOT_PIXEL_1X1, DRAW_FILL_FULL);
+    drawText(x0 + 2, 7, bat, &Font12, EPD_1IN54G_WHITE, EPD_1IN54G_BLACK);
+  }
 
   if (banner) {
     Paint_DrawRectangle(0, 86, W, 112, EPD_1IN54G_RED, DOT_PIXEL_1X1, DRAW_FILL_FULL);
@@ -612,7 +628,8 @@ void setup() {
   adc_bsp_init();
   float vbat = 0;
   adc_get_value(&vbat, NULL);
-  Serial.printf("[power] battery %.2f V\n", vbat);
+  if (vbat > 0.5f) battPct = battPercent(vbat);   // so the first card has it
+  Serial.printf("[power] battery %.2f V (%d%%)\n", vbat, battPct);
   selftest("battery", vbat > 0.5f);
 
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
@@ -669,6 +686,17 @@ void setup() {
 // browns out mid-playback with the panel never slept, and e-paper holds its
 // last image with no power -- so the card stays frozen on screen and the
 // device looks stuck. Waveshare also warn against leaving the panel un-slept.
+// Li-ion does not discharge linearly. Anchoring 3.30 V empty, 3.70 V nominal
+// at half, 4.20 V full and interpolating in two segments beats a single
+// straight line, which would read a nominal cell as ~44% rather than ~50%.
+static int battPercent(float v) {
+  float pct = (v >= 3.70f) ? 50.0f + (v - 3.70f) * (50.0f / 0.50f)
+                           : (v - 3.30f) * (50.0f / 0.40f);
+  if (pct < 0.0f)   pct = 0.0f;
+  if (pct > 100.0f) pct = 100.0f;
+  return (int)(pct + 0.5f);
+}
+
 static void checkBattery() {
   static uint32_t lastPoll = 0;
   static int      lowCount = 0;
@@ -680,6 +708,7 @@ static void checkBattery() {
   float v = 0;
   adc_get_value(&v, NULL);
   if (v < 0.5f) return;            // no plausible reading; do not act on it
+  battPct = battPercent(v);        // shown at the next redraw, see below
 
   if (v >= LOW_BATT_V) { lowCount = 0; return; }
 
